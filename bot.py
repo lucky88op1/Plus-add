@@ -1,73 +1,127 @@
-from pyrogram import Client, filters
-from pyrogram.types import Message
-import os
+import requests
+import time
+import re
+import telegram
+import phonenumbers
+from phonenumbers import geocoder
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-API_ID = 34964564          # apna api id
-API_HASH = "8a97e889da92079dbf90c59cee767e5b"     # apna api hash
-BOT_TOKEN = "8527111367:AAFi2LscCvNIExMbk2HpxsboHrciawNyByQ"   # apna bot token
+BOT_TOKEN = "8642429610:AAFFllSv1R4k7hP3f69jIm2a46eNw_LIlE0"
+CHAT_ID = -1003376156472
 
-app = Client(
-    "plus_number_bot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN
-)
+API_URL = "http://147.135.212.197/crapi/time/viewstats"
+TOKEN = "RFZWNEVBdlJ7iWhFfGZYan1UgWFqZIOGX2KChVxjmFt7aZVza4w="
+
+bot = telegram.Bot(token=BOT_TOKEN)
+
+sent = set()
+
+print("✅ OTP Forwarder Started...")
 
 
-# =========================
-# TEXT MESSAGE HANDLER
-# =========================
-@app.on_message(filters.text & filters.private)
-async def add_plus_text(client, message: Message):
-    text = message.text.strip()
+def get_flag(country_code):
+    try:
+        OFFSET = 127397
+        return ''.join(chr(ord(c) + OFFSET) for c in country_code.upper())
+    except:
+        return "🌍"
 
-    # commas remove + split by space/newline
-    numbers = text.replace(",", " ").split()
 
-    result = []
-    for number in numbers:
-        number = number.strip()
-        if number:
-            if number.startswith("+"):
-                result.append(number)
+while True:
+
+    try:
+
+        r = requests.get(API_URL, params={"token": TOKEN}, timeout=20)
+
+        if r.status_code != 200:
+            time.sleep(5)
+            continue
+
+        try:
+            data = r.json()
+        except:
+            print("⚠ API empty response")
+            time.sleep(5)
+            continue
+
+        if "data" not in data:
+            time.sleep(5)
+            continue
+
+        entries = data["data"]
+
+        for sms in entries:
+
+            number = sms.get("num")
+            message = str(sms.get("message"))
+            dt = sms.get("dt")
+            service = str(sms.get("cli", "UNKNOWN")).upper()
+
+            unique = str(number) + str(dt)
+
+            if unique in sent:
+                continue
+
+            sent.add(unique)
+
+            otp_match = re.search(r"\d{3}-\d{3}|\d{6}", message)
+
+            if otp_match:
+                otp = otp_match.group()
             else:
-                result.append("+" + number)
+                otp = "N/A"
 
-    await message.reply_text("\n".join(result))
+            try:
+                numobj = phonenumbers.parse("+" + number)
+                country = geocoder.description_for_number(numobj, "en")
+                country_code = phonenumbers.region_code_for_number(numobj)
+                flag = get_flag(country_code)
+            except:
+                country = "Unknown"
+                flag = "🌍"
 
+            text = f"""
+✅ {flag} {country} {service} OTP!
 
-# =========================
-# TXT FILE HANDLER
-# =========================
-@app.on_message(filters.document & filters.private)
-async def add_plus_file(client, message: Message):
+━━━━━━━━━━━━━━━━━━
 
-    if not message.document.file_name.endswith(".txt"):
-        return await message.reply_text("❌ Sirf .txt file bhejo")
+📱 Number: +{number}
+🔑 OTP: {otp}
 
-    file_path = await message.download()
-    new_file = "output.txt"
+⚙ Service: {service}
+⏳ Time: {dt}
 
-    with open(file_path, "r", encoding="utf-8") as f:
-        content = f.read()
+━━━━━━━━━━━━━━━━━━
 
-    numbers = content.replace(",", " ").split()
+💬 Message:
+{message}
 
-    with open(new_file, "w", encoding="utf-8") as f:
-        for number in numbers:
-            number = number.strip()
-            if number:
-                if number.startswith("+"):
-                    f.write(number + "\n")
-                else:
-                    f.write("+" + number + "\n")
+━━━━━━━━━━━━━━━━━━
+"""
 
-    await message.reply_document(new_file)
+            keyboard = [
+                [InlineKeyboardButton("📱 Numbers Channel", url="https://t.me/NumOTPV1BOT")]
+            ]
 
-    os.remove(file_path)
-    os.remove(new_file)
+            reply_markup = InlineKeyboardMarkup(keyboard)
 
+            try:
 
-# =========================
-print("Bot Running...")
-app.run()
+                bot.send_message(
+                    chat_id=CHAT_ID,
+                    text=text,
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=True
+                )
+
+                print("✅ OTP Forwarded:", otp)
+
+            except Exception as tg_error:
+
+                print("❌ Telegram Error:", tg_error)
+
+    except Exception as api_error:
+
+        print("❌ API Error:", api_error)
+
+    time.sleep(5)
